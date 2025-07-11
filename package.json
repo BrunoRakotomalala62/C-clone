@@ -1,7 +1,6 @@
 {
-  "name": "nodejs",
+  "name": "test-autobot",
   "version": "1.0.0",
-  "description": "",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -9,7 +8,14 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "description": "",
   "dependencies": {
-    "@types/node": "^22.13.11"
+    "fs": "^0.0.1-security",
+    "express": "^4.21.2",
+    "ws3-fca": "1.0.47",
+    "axios": "^1.7.9",
+    "fs-extra": "^11.3.0",
+    "stream": "^0.0.3",
+    "npmlog": "^7.0.1"
   }
 }
