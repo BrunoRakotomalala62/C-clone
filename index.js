@@ -135,6 +135,6 @@ app.get("/", (req, res) => {
     res.send("Bot is running");
 });
 
-app.listen(port, () => {
-    console.log(`Le serveur fonctionne sur http://localhost:${port}`);
+app.listen(port, "0.0.0.0", () => {
+    console.log(`Le serveur fonctionne sur http://0.0.0.0:${port}`);
 });
