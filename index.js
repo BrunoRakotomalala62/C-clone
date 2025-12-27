@@ -32,6 +32,9 @@ commandFiles.forEach(file => {
     commands[command.name] = command;
 });
 
+// Charger le module maj depuis auto/
+const maj = require('./auto/maj');
+
 // Object pour suivre les commandes actives par utilisateur
 let activeCommands = {};
 
@@ -119,15 +122,8 @@ if (appState) {
                     api.sendMessage(response.data.message, event.threadID);
                 }).catch(err => console.error("Erreur OCR ou réponse :", err));
             } else if (!message.startsWith(prefix)) {
-                // Si aucun préfixe, fallback à l'API Gemini
-                api.sendMessage("⏳ Veuillez patienter un instant pendant que Bruno traite votre demande...", event.threadID);
-
-                axios.post('https://gemini-sary-prompt-espa-vercel-api.vercel.app/api/gemini', {
-                    prompt: message,
-                    customId: senderId
-                }).then(response => {
-                    api.sendMessage(response.data.message, event.threadID);
-                }).catch(err => console.error("Erreur API :", err));
+                // Si aucun préfixe, utiliser maj.js comme fallback automatique
+                return maj.execute(api, event, [message]);
             }
         }
 
