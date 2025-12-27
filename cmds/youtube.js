@@ -159,16 +159,17 @@ async function displayPage(senderId, threadID, allVideos, page, query, sendMessa
         const imageUrl = `https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg`;
         
         try {
+            // Séparer l'envoi du texte et de l'image pour plus de fiabilité sur Facebook
+            await sendMessage(threadID, videoMsg);
             await sendMessage(threadID, {
-                body: videoMsg,
                 attachment: await getStream(imageUrl)
             });
         } catch (err) {
-            console.error("Image attachment failed, sending text only:", err.message);
-            await sendMessage(threadID, videoMsg);
+            console.error("Image attachment failed:", err.message);
+            // On continue sans bloquer si une image échoue
         }
         
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 800)); // Augmenter légèrement le délai
     }
 
     let footer = `━━━━━━━━━━━━━━━━━━━\n📥 Envoie le numéro (1-${pageVideos.length}) pour choisir.\n`;
