@@ -140,6 +140,43 @@ app.get("/", (req, res) => {
     res.send("Bot is running");
 });
 
+// Endpoint de santé pour le ping automatique
+app.get("/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Système d'auto-ping pour garder le bot actif 24/7
+function startAutoPing() {
+    // Ping toutes les 15 minutes (900 secondes)
+    const PING_INTERVAL = 15 * 60 * 1000; // 15 minutes
+    
+    // Fonction pour envoyer le ping
+    async function sendPing() {
+        try {
+            // Récupérer le domaine depuis l'environnement Replit
+            const domain = process.env.REPLIT_DOMAINS || `localhost:${port}`;
+            const pingUrl = `http://${domain}/health`;
+            
+            const response = await axios.get(pingUrl, { timeout: 5000 });
+            console.log(`🔵 [AUTO-PING] ${new Date().toISOString()} - Bot actif ✅`);
+        } catch (error) {
+            console.log(`🔴 [AUTO-PING] Erreur: ${error.message}`);
+        }
+    }
+    
+    // Premier ping après 1 minute
+    setTimeout(() => {
+        console.log("🟢 [AUTO-PING] Système d'auto-ping activé - Bot restera actif 24/7");
+        sendPing();
+    }, 60000);
+    
+    // Puis pingue toutes les 15 minutes
+    setInterval(sendPing, PING_INTERVAL);
+}
+
 app.listen(port, "0.0.0.0", () => {
     console.log(`Le serveur fonctionne sur http://0.0.0.0:${port}`);
+    
+    // Démarrer le système d'auto-ping
+    startAutoPing();
 });
