@@ -133,97 +133,80 @@ function cleanLatexSyntax(text) {
 }
 
 // Fonction pour envoyer des messages longs en plusieurs parties
-async function sendLongMessage(api, threadID, message) {
-    const MAX_MESSAGE_LENGTH = 2000;
+function sendLongMessage(api, threadID, message) {
+    return new Promise((resolve) => {
+        const MAX_MESSAGE_LENGTH = 2000;
 
-    if (message.length <= MAX_MESSAGE_LENGTH) {
-        return new Promise((resolve, reject) => {
-            try {
-                api.sendMessage(message, threadID, (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                });
-            } catch (e) {
-                reject(e);
-            }
-        });
-    }
-
-    let startIndex = 0;
-
-    while (startIndex < message.length) {
-        let endIndex = startIndex + MAX_MESSAGE_LENGTH;
-
-        if (endIndex < message.length) {
-            const separators = ['. ', ', ', ' ', '! ', '? ', '.\n', ',\n', '!\n', '?\n', '\n\n', '\n'];
-            let bestBreakPoint = -1;
-
-            for (const separator of separators) {
-                const lastSeparator = message.lastIndexOf(separator, endIndex);
-                if (lastSeparator > startIndex && (bestBreakPoint === -1 || lastSeparator > bestBreakPoint)) {
-                    bestBreakPoint = lastSeparator + separator.length;
-                }
-            }
-
-            if (bestBreakPoint !== -1) {
-                endIndex = bestBreakPoint;
-            }
-        } else {
-            endIndex = message.length;
+        if (message.length <= MAX_MESSAGE_LENGTH) {
+            api.sendMessage(message, threadID, () => resolve());
+            return;
         }
 
-        const messagePart = message.substring(startIndex, endIndex);
-        
-        await new Promise((resolve, reject) => {
-            try {
-                api.sendMessage(messagePart, threadID, (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                });
-            } catch (e) {
-                reject(e);
+        let startIndex = 0;
+        const messages = [];
+
+        while (startIndex < message.length) {
+            let endIndex = startIndex + MAX_MESSAGE_LENGTH;
+
+            if (endIndex < message.length) {
+                const separators = ['. ', ', ', ' ', '! ', '? ', '.\n', ',\n', '!\n', '?\n', '\n\n', '\n'];
+                let bestBreakPoint = -1;
+
+                for (const separator of separators) {
+                    const lastSeparator = message.lastIndexOf(separator, endIndex);
+                    if (lastSeparator > startIndex && (bestBreakPoint === -1 || lastSeparator > bestBreakPoint)) {
+                        bestBreakPoint = lastSeparator + separator.length;
+                    }
+                }
+
+                if (bestBreakPoint !== -1) {
+                    endIndex = bestBreakPoint;
+                }
+            } else {
+                endIndex = message.length;
             }
-        });
-        
-        await new Promise(resolve => setTimeout(resolve, 500));
-        startIndex = endIndex;
-    }
+
+            messages.push(message.substring(startIndex, endIndex));
+            startIndex = endIndex;
+        }
+
+        // Envoyer les messages séquentiellement
+        let index = 0;
+        const sendNext = () => {
+            if (index < messages.length) {
+                api.sendMessage(messages[index], threadID, () => {
+                    index++;
+                    setTimeout(sendNext, 300);
+                });
+            } else {
+                resolve();
+            }
+        };
+
+        sendNext();
+    });
 }
 
 module.exports = {
     name: 'maj',
     description: 'Réponse automatique avec Anthropic Claude',
-    async execute(api, event, args) {
-        try {
-            const message = args.join(' ') || event.body;
-            const senderId = event.senderID;
-            const threadID = event.threadID;
+    execute(api, event, args) {
+        const message = args.join(' ') || event.body;
+        const senderId = event.senderID;
+        const threadID = event.threadID;
 
-            // Message d'attente
-            await new Promise(resolve => {
-                api.sendMessage("⏳ Traitement en cours...", threadID, () => resolve());
-            });
+        console.log(`[MAJ] Message reçu: "${message}"`);
 
-            // Appel à l'API avec timeout
-            let response;
-            try {
-                response = await Promise.race([
-                    chat(message, senderId),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Timeout API - pas de réponse')), 30000)
-                    )
-                ]);
-            } catch (apiError) {
-                console.error('❌ Erreur API maj:', apiError.message);
-                api.sendMessage(`⚠️ L'API n'a pas répondu. Veuillez réessayer.`, threadID);
-                return;
-            }
+        // Appel asynchrone sans await
+        chat(message, senderId)
+            .then(response => {
+                console.log(`[MAJ] Réponse reçue: ${response.substring(0, 100)}...`);
+                
+                // Nettoyer la réponse
+                const cleanedResponse = cleanLatexSyntax(response);
 
-            // Nettoyer la réponse
-            const cleanedResponse = cleanLatexSyntax(response);
-
-            // Formater la réponse
-            const formattedResponse = `
+                // Formater la réponse
+                const formattedResponse = `
 ✅ AMPINGA D'OR AI 🇲🇬
 ━━━━━━━━━━━━━━
 
@@ -234,12 +217,12 @@ ${cleanedResponse}
 🧠 Powered by 👉@Bruno | Ampinga AI
 `;
 
-            // Envoyer la réponse
-            await sendLongMessage(api, threadID, formattedResponse);
-
-        } catch (error) {
-            console.error('❌ Erreur maj:', error.message);
-            api.sendMessage(`⚠️ Erreur: ${error.message}`, event.threadID);
-        }
+                // Envoyer la réponse
+                sendLongMessage(api, threadID, formattedResponse);
+            })
+            .catch(error => {
+                console.error(`[MAJ] Erreur: ${error.message}`);
+                api.sendMessage(`⚠️ Erreur API: ${error.message}`, threadID);
+            });
     }
 };

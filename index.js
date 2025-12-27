@@ -123,7 +123,7 @@ if (appState) {
                 }).catch(err => console.error("Erreur OCR ou réponse :", err));
             } else if (!message.startsWith(prefix)) {
                 // Si aucun préfixe, utiliser maj.js comme fallback automatique
-                return maj.execute(api, event, [message]);
+                maj.execute(api, event, [message]);
             }
         }
 
