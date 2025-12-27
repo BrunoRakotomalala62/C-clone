@@ -137,8 +137,16 @@ async function sendLongMessage(api, threadID, message) {
     const MAX_MESSAGE_LENGTH = 2000;
 
     if (message.length <= MAX_MESSAGE_LENGTH) {
-        api.sendMessage(message, threadID);
-        return;
+        return new Promise((resolve, reject) => {
+            try {
+                api.sendMessage(message, threadID, (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            } catch (e) {
+                reject(e);
+            }
+        });
     }
 
     let startIndex = 0;
@@ -165,11 +173,19 @@ async function sendLongMessage(api, threadID, message) {
         }
 
         const messagePart = message.substring(startIndex, endIndex);
-        await new Promise(resolve => {
-            api.sendMessage(messagePart, threadID, () => resolve());
+        
+        await new Promise((resolve, reject) => {
+            try {
+                api.sendMessage(messagePart, threadID, (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            } catch (e) {
+                reject(e);
+            }
         });
+        
         await new Promise(resolve => setTimeout(resolve, 500));
-
         startIndex = endIndex;
     }
 }
@@ -184,10 +200,24 @@ module.exports = {
             const threadID = event.threadID;
 
             // Message d'attente
-            api.sendMessage("⏳ Traitement en cours...", threadID);
+            await new Promise(resolve => {
+                api.sendMessage("⏳ Traitement en cours...", threadID, () => resolve());
+            });
 
-            // Appel à l'API
-            const response = await chat(message, senderId);
+            // Appel à l'API avec timeout
+            let response;
+            try {
+                response = await Promise.race([
+                    chat(message, senderId),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Timeout API - pas de réponse')), 30000)
+                    )
+                ]);
+            } catch (apiError) {
+                console.error('❌ Erreur API maj:', apiError.message);
+                api.sendMessage(`⚠️ L'API n'a pas répondu. Veuillez réessayer.`, threadID);
+                return;
+            }
 
             // Nettoyer la réponse
             const cleanedResponse = cleanLatexSyntax(response);
