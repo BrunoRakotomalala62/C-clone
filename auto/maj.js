@@ -128,6 +128,8 @@ async function chat(prompt, uid) {
         const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
         const API_KEY = 'rapi_4806a41790cd4a83921d56b667ab3f16';
 
+        console.log(`[CHAT] Appel API pour: "${prompt.substring(0, 50)}..."`);
+
         const params = {
             q: prompt,
             uid: uid,
@@ -148,11 +150,15 @@ async function chat(prompt, uid) {
         });
         const result = response.data;
 
+        console.log(`[CHAT] Réponse reçue: ${JSON.stringify(result).substring(0, 100)}`);
+
         if (!result || !result.response) {
             throw new Error(result?.error || 'Aucune réponse reçue de l\'API');
         }
 
-        return replaceBranding(formatText(result.response));
+        const formatted = replaceBranding(formatText(result.response));
+        console.log(`[CHAT] Réponse formatée: "${formatted.substring(0, 50)}..."`);
+        return formatted;
     } catch (error) {
         console.error('❌ Erreur chat Anthropic:', error.message);
         throw error;
@@ -277,6 +283,8 @@ const conversationHistoryOld = {};
 
 async function handleTextMessage(api, senderId, threadID, message) {
     try {
+        console.log(`[TEXT] Début traitement: ${senderId} - "${message.substring(0, 50)}..."`);
+        
         if (!conversationHistoryOld[senderId]) {
             conversationHistoryOld[senderId] = {
                 messages: [],
@@ -298,10 +306,13 @@ async function handleTextMessage(api, senderId, threadID, message) {
             return;
         }
 
+        console.log(`[TEXT] Envoi message d'attente...`);
         api.sendMessage("✨🧠 Analyse en cours... AMPINGA AI réfléchit à votre requête! ⏳💫", threadID);
 
         let response;
         let imageUrls = pendingImages[senderId] || (conversationHistoryOld[senderId].imageUrl ? [conversationHistoryOld[senderId].imageUrl] : null);
+
+        console.log(`[TEXT] Appel API... (imageUrls: ${imageUrls ? imageUrls.length : 0})`);
 
         if (imageUrls && imageUrls.length > 0) {
             try {
@@ -318,8 +329,9 @@ async function handleTextMessage(api, senderId, threadID, message) {
             }
         } else {
             try {
-                console.log('💬 Traitement sans image, message:', message);
+                console.log('💬 Appel chat()...');
                 response = await chat(message, senderId);
+                console.log('💬 Réponse chat reçue!');
                 conversationHistoryOld[senderId].hasImage = false;
                 conversationHistoryOld[senderId].imageUrl = null;
             } catch (error) {
@@ -327,6 +339,8 @@ async function handleTextMessage(api, senderId, threadID, message) {
                 response = `Désolé, je n'ai pas pu traiter votre demande.\n\nErreur: ${error.message}`;
             }
         }
+
+        console.log(`[TEXT] Réponse finale reçue: ${response ? response.substring(0, 50) : 'VIDE'}`);
 
         if (!response) {
             api.sendMessage("⚠️ Aucune réponse reçue de l'API.", threadID);
@@ -346,7 +360,9 @@ ${cleanedResponse}
 🧠 Powered by 👉@Bruno | Ampinga AI
 `;
 
+        console.log(`[TEXT] Envoi réponse longue...`);
         await sendLongMessage(api, threadID, formattedResponse);
+        console.log(`[TEXT] Réponse envoyée!`);
 
         if (pendingImages[senderId]) {
             delete pendingImages[senderId];
@@ -415,6 +431,5 @@ module.exports = {
         handleTextMessage(api, event.senderID, event.threadID, message);
     },
     handleTextMessage,
-    handleImageMessage,
-    initAPI
+    handleImageMessage
 };

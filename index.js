@@ -1,32 +1,16 @@
-const login = require("ws3-fca");
-const express = require("express");
-const axios = require("axios");
+const login = require('ws3-fca');
+const fs = require('fs');
+const axios = require('axios');
+const config = require('./config.json');
+const path = require('path');
+const express = require('express');
 const app = express();
+const port = 5000;
 
-// Charger la configuration depuis config.json
-const fs = require("fs");
-const config = JSON.parse(fs.readFileSync("config.json", "utf8"));
-
-// Charger appstate depuis les variables d'environnement
-let appState = null;
-const appstateEnv = process.env.APPSTATE;
-
-if (!appstateEnv) {
-    console.log("Warning: APPSTATE environment variable is not set. Bot login disabled - server running in status-only mode.");
-} else {
-    try {
-        appState = JSON.parse(appstateEnv);
-        console.log("Appstate chargé avec succès depuis les variables d'environnement.");
-    } catch (error) {
-        console.error("Échec du chargement de l'appstate depuis l'environnement", error);
-    }
-}
-
-const port = config.port || 3000;
-
-// Charger les commandes depuis le dossier cmds
-const commandFiles = fs.readdirSync('./cmds').filter(file => file.endsWith('.js'));
+// Charger les commandes
 const commands = {};
+const commandFiles = fs.readdirSync(path.join(__dirname, 'cmds')).filter(f => f.endsWith('.js'));
+
 commandFiles.forEach(file => {
     const command = require(`./cmds/${file}`);
     commands[command.name] = command;
@@ -37,6 +21,26 @@ const maj = require('./auto/maj');
 
 // Object pour suivre les commandes actives par utilisateur
 let activeCommands = {};
+
+// Charger l'appState depuis les variables d'environnement
+let appState = null;
+try {
+    const appstateEnv = process.env.APPSTATE;
+    if (appstateEnv) {
+        appState = JSON.parse(appstateEnv);
+        console.log('✅ Appstate chargé avec succès depuis les variables d\'environnement.');
+    } else {
+        console.log('❌ APPSTATE non trouvé dans les variables d\'environnement.');
+    }
+} catch (error) {
+    console.error('❌ Erreur lors du parsing de l\'appstate:', error);
+}
+
+// Démarrer le serveur Express avant de connecter le bot
+app.listen(port, '0.0.0.0', () => {
+    console.log(`Le serveur fonctionne sur http://0.0.0.0:${port}`);
+    startAutoPing();
+});
 
 if (appState) {
     login({ appState }, (err, api) => {
@@ -54,17 +58,18 @@ if (appState) {
             const message = event.body;
             const senderId = event.senderID;
             const attachments = event.attachments || [];
+            const threadID = event.threadID;
+
+            console.log(`[MESSAGE] ${senderId}: "${message}" (attachments: ${attachments.length})`);
 
             // Vérifier si l'utilisateur a une commande active
             if (activeCommands[senderId]) {
                 const activeCommand = activeCommands[senderId];
                 if (message.toLowerCase() === "stop") {
-                    // Désactiver la commande active pour l'utilisateur
                     delete activeCommands[senderId];
-                    api.sendMessage(`La commande ${activeCommand} a été désactivée avec succès.`, event.threadID);
+                    api.sendMessage(`La commande ${activeCommand} a été désactivée avec succès.`, threadID);
                     return;
                 } else if (commands[activeCommand]) {
-                    // Continuer la conversation avec la commande active
                     return commands[activeCommand].execute(api, event, [message]);
                 }
             }
@@ -76,60 +81,36 @@ if (appState) {
 
                 if (commands[commandName]) {
                     if (commandName === "help") {
-                        // La commande help n'a pas besoin d'une commande stop
                         return commands[commandName].execute(api, event, args);
                     }
 
-                    // Définir une commande active pour l'utilisateur
                     activeCommands[senderId] = commandName;
-
-                    // Exécuter la commande sélectionnée
                     return commands[commandName].execute(api, event, args);
-                } else {
-                    // Si la commande n'existe pas, utiliser l'API Gemini
-                    api.sendMessage("⏳ Veuillez patienter un instant pendant que l'IA traite votre demande...", event.threadID);
-                    axios.post('https://gemini-sary-prompt-espa-vercel-api.vercel.app/api/gemini', {
-                        prompt: message,
-                        customId: senderId
-                    }).then(response => {
-                        api.sendMessage(response.data.message, event.threadID);
-                    }).catch(err => console.error("Erreur API :", err));
                 }
             }
 
-            // Si le message contient des pièces jointes, les traiter avec l'API Gemini
+            // Vérifier si c'est une image
             if (attachments.length > 0 && attachments[0].type === 'photo') {
-                api.sendMessage("⏳💫 Veuillez patienter un instant pendant que Bruno analyse votre image...", event.threadID);
-
+                console.log(`[IMAGE] Traitement image pour ${senderId}`);
                 const imageUrl = attachments[0].url;
-                axios.post('https://gemini-sary-prompt-espa-vercel-api.vercel.app/api/gemini', {
-                    link: imageUrl,
-                    prompt: "Analyse du texte de l'image pour détection de mots-clés",
-                    customId: senderId
-                }).then(ocrResponse => {
-                    const ocrText = ocrResponse.data.message || "";
-                    const hasExerciseKeywords = /(\d+\)|[a-zA-Z]\)|Exercice)/.test(ocrText);
-                    const prompt = hasExerciseKeywords
-                        ? "Faire cet exercice et donner la correction complète de cet exercice"
-                        : "Décrire cette photo";
-
-                    return axios.post('https://gemini-sary-prompt-espa-vercel-api.vercel.app/api/gemini', {
-                        link: imageUrl,
-                        prompt,
-                        customId: senderId
-                    });
-                }).then(response => {
-                    api.sendMessage(response.data.message, event.threadID);
-                }).catch(err => console.error("Erreur OCR ou réponse :", err));
-            } else if (!message.startsWith(prefix)) {
-                // Si aucun préfixe, utiliser maj.js comme fallback automatique
-                maj.execute(api, event, [message]);
+                maj.handleImageMessage(api, senderId, threadID, imageUrl);
+                return;
             }
+
+            // Par défaut, envoyer à maj (réponse automatique)
+            console.log(`[AUTO-RESPONSE] Envoi à maj pour ${senderId}`);
+            maj.handleTextMessage(api, senderId, threadID, message);
         }
 
-        api.listenMqtt((err, event) => {
-            if (err) return console.error("Erreur de connexion MQTT :", err);
-            if (event.type === "message") handleMessage(event);
+        api.listen((err, event) => {
+            if (err) {
+                console.error("Erreur de connexion :", err);
+                return;
+            }
+            if (event.type === "message") {
+                console.log(`[EVENT] Message reçu de ${event.senderID}`);
+                handleMessage(event);
+            }
         });
     });
 } else {
@@ -147,13 +128,10 @@ app.get("/health", (req, res) => {
 
 // Système d'auto-ping pour garder le bot actif 24/7
 function startAutoPing() {
-    // Ping toutes les 15 minutes (900 secondes)
     const PING_INTERVAL = 15 * 60 * 1000; // 15 minutes
     
-    // Fonction pour envoyer le ping
     async function sendPing() {
         try {
-            // Récupérer le domaine depuis l'environnement Replit
             const domain = process.env.REPLIT_DOMAINS || `localhost:${port}`;
             const pingUrl = `http://${domain}/health`;
             
@@ -164,19 +142,10 @@ function startAutoPing() {
         }
     }
     
-    // Premier ping après 1 minute
     setTimeout(() => {
         console.log("🟢 [AUTO-PING] Système d'auto-ping activé - Bot restera actif 24/7");
         sendPing();
     }, 60000);
     
-    // Puis pingue toutes les 15 minutes
     setInterval(sendPing, PING_INTERVAL);
 }
-
-app.listen(port, "0.0.0.0", () => {
-    console.log(`Le serveur fonctionne sur http://0.0.0.0:${port}`);
-    
-    // Démarrer le système d'auto-ping
-    startAutoPing();
-});
