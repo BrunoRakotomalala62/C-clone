@@ -39,8 +39,12 @@ module.exports = {
     const sendMessage = async (id, msg) => {
       return new Promise((resolve, reject) => {
         api.sendMessage(msg, id, (err, info) => {
-          if (err) reject(err);
-          else resolve(info);
+          if (err) {
+            console.error("SendMessage Error:", err);
+            reject(err);
+          } else {
+            resolve(info);
+          }
         });
       });
     };
@@ -50,7 +54,6 @@ module.exports = {
         const input = (typeof prompt === 'string') ? prompt.trim() : '';
         const session = userSessions.get(senderId) || {};
 
-        // Gestion de la réponse Oui/Non pour le lien de téléchargement
         if (session.pendingDownloadLink) {
             const answer = input.toLowerCase();
             if (answer === 'oui' || answer === 'yes') {
@@ -63,7 +66,6 @@ module.exports = {
             return;
         }
 
-        // Gestion de la sélection du format (-v, -a, -i) après avoir choisi un numéro
         if (session.pendingFormat && session.selectedVideo) {
             const format = input.toLowerCase();
             if (format === '-v' || format === 'video') {
@@ -79,7 +81,6 @@ module.exports = {
             return;
         }
 
-        // Gestion du choix du numéro
         if (/^\d+$/.test(input) && session.allVideos) {
             const index = parseInt(input) - 1;
             const pageVideos = getVideosForPage(session.allVideos, session.currentPage || 1);
@@ -94,7 +95,6 @@ module.exports = {
             return;
         }
 
-        // Gestion de la pagination
         if (input.toLowerCase().startsWith('page ') && session.allVideos) {
             const page = parseInt(input.replace('page ', ''));
             const totalPages = Math.ceil(session.allVideos.length / VIDEOS_PER_PAGE);
@@ -106,7 +106,6 @@ module.exports = {
             return;
         }
 
-        // Recherche par défaut
         if (input) {
             await handleVideoSearch(senderId, threadID, input, sendMessage);
         } else {
@@ -123,19 +122,24 @@ module.exports = {
 async function handleVideoSearch(senderId, threadID, query, sendMessage) {
     await sendMessage(threadID, `🔍 Recherche de "${query}"...`);
     
-    const searchUrl = `${API_BASE}/recherche?titre=${encodeURIComponent(query)}`;
-    const response = await axios.get(searchUrl);
-    
-    if (response.data && response.data.videos && response.data.videos.length > 0) {
-        const allVideos = response.data.videos;
-        userSessions.set(senderId, {
-            allVideos,
-            query,
-            currentPage: 1
-        });
-        await displayPage(senderId, threadID, allVideos, 1, query, sendMessage);
-    } else {
-        await sendMessage(threadID, `😔 Aucun résultat trouvé pour "${query}"`);
+    try {
+        const searchUrl = `${API_BASE}/recherche?titre=${encodeURIComponent(query)}`;
+        const response = await axios.get(searchUrl);
+        
+        if (response.data && response.data.videos && response.data.videos.length > 0) {
+            const allVideos = response.data.videos;
+            userSessions.set(senderId, {
+                allVideos,
+                query,
+                currentPage: 1
+            });
+            await displayPage(senderId, threadID, allVideos, 1, query, sendMessage);
+        } else {
+            await sendMessage(threadID, `😔 Aucun résultat trouvé pour "${query}"`);
+        }
+    } catch (error) {
+        console.error("Search API Error:", error.message);
+        throw error;
     }
 }
 
@@ -152,15 +156,17 @@ async function displayPage(senderId, threadID, allVideos, page, query, sendMessa
         const displayNum = i + 1;
         const videoMsg = `┏━━━━━━━━━━━━━━━━━━━\n┃ ${displayNum}️⃣ ${video.title}\n┗━━━━━━━━━━━━━━━━━━━`;
         
-        await sendMessage(threadID, videoMsg);
-        
         const imageUrl = `https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg`;
-        await sendMessage(threadID, {
-            attachment: {
-                type: 'image',
-                payload: { url: imageUrl, is_reusable: true }
-            }
-        });
+        
+        try {
+            await sendMessage(threadID, {
+                body: videoMsg,
+                attachment: await getStream(imageUrl)
+            });
+        } catch (err) {
+            console.error("Image attachment failed, sending text only:", err.message);
+            await sendMessage(threadID, videoMsg);
+        }
         
         await new Promise(resolve => setTimeout(resolve, 500));
     }
@@ -170,6 +176,11 @@ async function displayPage(senderId, threadID, allVideos, page, query, sendMessa
     if (page > 1) footer += `\n⬅️ Tape "page ${page - 1}" pour revenir.`;
     
     await sendMessage(threadID, footer);
+}
+
+async function getStream(url) {
+    const res = await axios.get(url, { responseType: 'stream' });
+    return res.data;
 }
 
 function getVideosForPage(allVideos, page) {
@@ -187,11 +198,9 @@ async function handleVideoDownload(senderId, threadID, video, format, sendMessag
         const dlRes = await axios.get(downloadUrl);
         if (dlRes.data && dlRes.data.success && dlRes.data.result) {
             const directUrl = dlRes.data.result.downloadUrl;
+            
             await sendMessage(threadID, {
-                attachment: {
-                    type: format === 'MP3' ? 'audio' : 'video',
-                    payload: { url: directUrl, is_reusable: true }
-                }
+                attachment: await getStream(directUrl)
             });
 
             userSessions.set(senderId, { 
@@ -204,9 +213,10 @@ async function handleVideoDownload(senderId, threadID, video, format, sendMessag
             }, 2000);
 
         } else {
-            throw new Error();
+            throw new Error("Download API success=false");
         }
     } catch (e) {
+        console.error("Download Error:", e.message);
         await sendMessage(threadID, "❌ Erreur lors du téléchargement. Le fichier est peut-être trop lourd.");
         userSessions.delete(senderId);
     }
