@@ -32,7 +32,19 @@ module.exports = {
   description: "Rechercher et télécharger des vidéos YouTube",
   role: 0,
   author: "Vercel / Norch",
-  execute: async ({ senderId, args, api, sendMessage }) => {
+  execute: async (api, event, args) => {
+    const senderId = event.senderID;
+    const threadID = event.threadID;
+
+    const sendMessage = async (id, msg) => {
+      return new Promise((resolve, reject) => {
+        api.sendMessage(msg, id, (err, info) => {
+          if (err) reject(err);
+          else resolve(info);
+        });
+      });
+    };
+
     try {
         const prompt = args.join(" ");
         const input = (typeof prompt === 'string') ? prompt.trim() : '';
@@ -42,10 +54,10 @@ module.exports = {
         if (session.pendingDownloadLink) {
             const answer = input.toLowerCase();
             if (answer === 'oui' || answer === 'yes') {
-                await sendMessage(senderId, `🔗 Voici votre lien de téléchargement direct :\n${session.lastDownloadUrl}`);
+                await sendMessage(threadID, `🔗 Voici votre lien de téléchargement direct :\n${session.lastDownloadUrl}`);
                 userSessions.delete(senderId);
             } else if (answer === 'non' || answer === 'no') {
-                await sendMessage(senderId, "D'accord ! N'hésitez pas si vous avez besoin d'autre chose. 😊");
+                await sendMessage(threadID, "D'accord ! N'hésitez pas si vous avez besoin d'autre chose. 😊");
                 userSessions.delete(senderId);
             }
             return;
@@ -55,14 +67,14 @@ module.exports = {
         if (session.pendingFormat && session.selectedVideo) {
             const format = input.toLowerCase();
             if (format === '-v' || format === 'video') {
-                await handleVideoDownload(senderId, session.selectedVideo, 'MP4', sendMessage);
+                await handleVideoDownload(senderId, threadID, session.selectedVideo, 'MP4', sendMessage);
             } else if (format === '-a' || format === 'audio') {
-                await handleVideoDownload(senderId, session.selectedVideo, 'MP3', sendMessage);
+                await handleVideoDownload(senderId, threadID, session.selectedVideo, 'MP3', sendMessage);
             } else if (format === '-i' || format === 'info') {
-                await handleInfoDisplay(senderId, session.selectedVideo, sendMessage);
+                await handleInfoDisplay(threadID, session.selectedVideo, sendMessage);
                 userSessions.delete(senderId);
             } else {
-                await sendMessage(senderId, "❌ Format invalide. Choisis : -v (vidéo), -a (audio) ou -i (infos)");
+                await sendMessage(threadID, "❌ Format invalide. Choisis : -v (vidéo), -a (audio) ou -i (infos)");
             }
             return;
         }
@@ -75,9 +87,9 @@ module.exports = {
             if (index >= 0 && index < pageVideos.length) {
                 const selectedVideo = pageVideos[index];
                 userSessions.set(senderId, { ...session, selectedVideo, pendingFormat: true });
-                await sendMessage(senderId, `🎯 Tu as choisi : ${selectedVideo.title}\n\nQue veux-tu faire ?\n▶️ Tape -v pour la vidéo\n🎵 Tape -a pour l'audio\nℹ️ Tape -i pour les infos`);
+                await sendMessage(threadID, `🎯 Tu as choisi : ${selectedVideo.title}\n\nQue veux-tu faire ?\n▶️ Tape -v pour la vidéo\n🎵 Tape -a pour l'audio\nℹ️ Tape -i pour les infos`);
             } else {
-                await sendMessage(senderId, `❌ Numéro invalide. Choisis entre 1 et ${pageVideos.length}`);
+                await sendMessage(threadID, `❌ Numéro invalide. Choisis entre 1 et ${pageVideos.length}`);
             }
             return;
         }
@@ -87,29 +99,29 @@ module.exports = {
             const page = parseInt(input.replace('page ', ''));
             const totalPages = Math.ceil(session.allVideos.length / VIDEOS_PER_PAGE);
             if (page >= 1 && page <= totalPages) {
-                await displayPage(senderId, session.allVideos, page, session.query, sendMessage);
+                await displayPage(senderId, threadID, session.allVideos, page, session.query, sendMessage);
             } else {
-                await sendMessage(senderId, `❌ Page invalide (1-${totalPages})`);
+                await sendMessage(threadID, `❌ Page invalide (1-${totalPages})`);
             }
             return;
         }
 
         // Recherche par défaut
         if (input) {
-            await handleVideoSearch(senderId, input, sendMessage);
+            await handleVideoSearch(senderId, threadID, input, sendMessage);
         } else {
-            await sendMessage(senderId, "🎬 𝗬𝗢𝗨𝗧𝗨Ｂ𝗘 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥 🎬\n━━━━━━━━━━━━━━━━━━━\nUtilisation : youtube <titre>");
+            await sendMessage(threadID, "🎬 𝗬𝗢𝗨𝗧𝗨Ｂ𝗘 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥 🎬\n━━━━━━━━━━━━━━━━━━━\nUtilisation : youtube <titre>");
         }
 
     } catch (error) {
         console.error('Erreur youtube:', error.message);
-        await sendMessage(senderId, `❌ Une erreur est survenue.`);
+        await sendMessage(threadID, `❌ Une erreur est survenue.`);
     }
   }
 };
 
-async function handleVideoSearch(senderId, query, sendMessage) {
-    await sendMessage(senderId, `🔍 Recherche de "${query}"...`);
+async function handleVideoSearch(senderId, threadID, query, sendMessage) {
+    await sendMessage(threadID, `🔍 Recherche de "${query}"...`);
     
     const searchUrl = `${API_BASE}/recherche?titre=${encodeURIComponent(query)}`;
     const response = await axios.get(searchUrl);
@@ -121,29 +133,29 @@ async function handleVideoSearch(senderId, query, sendMessage) {
             query,
             currentPage: 1
         });
-        await displayPage(senderId, allVideos, 1, query, sendMessage);
+        await displayPage(senderId, threadID, allVideos, 1, query, sendMessage);
     } else {
-        await sendMessage(senderId, `😔 Aucun résultat trouvé pour "${query}"`);
+        await sendMessage(threadID, `😔 Aucun résultat trouvé pour "${query}"`);
     }
 }
 
-async function displayPage(senderId, allVideos, page, query, sendMessage) {
+async function displayPage(senderId, threadID, allVideos, page, query, sendMessage) {
     const totalPages = Math.ceil(allVideos.length / VIDEOS_PER_PAGE);
     const pageVideos = getVideosForPage(allVideos, page);
     
     userSessions.set(senderId, { ...userSessions.get(senderId), currentPage: page });
     
-    await sendMessage(senderId, `🎬 𝗥𝗘́𝗦𝗨𝗟𝗧𝗔𝗧𝗦 𝗬𝗢𝗨𝗧𝗨𝗕𝗘 🎬\n━━━━━━━━━━━━━━━━━━━\n🔎 "${query}"\n📄 Page ${page}/${totalPages}\n✨ ${getRandomMessage(SEARCH_MESSAGES)}`);
+    await sendMessage(threadID, `🎬 𝗥𝗘́𝗦𝗨𝗟𝗧𝗔𝗧𝗦 𝗬𝗢𝗨𝗧𝗨𝗕𝗘 🎬\n━━━━━━━━━━━━━━━━━━━\n🔎 "${query}"\n📄 Page ${page}/${totalPages}\n✨ ${getRandomMessage(SEARCH_MESSAGES)}`);
 
     for (let i = 0; i < pageVideos.length; i++) {
         const video = pageVideos[i];
         const displayNum = i + 1;
         const videoMsg = `┏━━━━━━━━━━━━━━━━━━━\n┃ ${displayNum}️⃣ ${video.title}\n┗━━━━━━━━━━━━━━━━━━━`;
         
-        await sendMessage(senderId, videoMsg);
+        await sendMessage(threadID, videoMsg);
         
         const imageUrl = `https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg`;
-        await sendMessage(senderId, {
+        await sendMessage(threadID, {
             attachment: {
                 type: 'image',
                 payload: { url: imageUrl, is_reusable: true }
@@ -157,7 +169,7 @@ async function displayPage(senderId, allVideos, page, query, sendMessage) {
     if (page < totalPages) footer += `➡️ Tape "page ${page + 1}" pour la suite.`;
     if (page > 1) footer += `\n⬅️ Tape "page ${page - 1}" pour revenir.`;
     
-    await sendMessage(senderId, footer);
+    await sendMessage(threadID, footer);
 }
 
 function getVideosForPage(allVideos, page) {
@@ -165,8 +177,8 @@ function getVideosForPage(allVideos, page) {
     return allVideos.slice(start, start + VIDEOS_PER_PAGE);
 }
 
-async function handleVideoDownload(senderId, video, format, sendMessage) {
-    await sendMessage(senderId, `${getRandomMessage(DOWNLOAD_MESSAGES)}\nFormat: ${format}`);
+async function handleVideoDownload(senderId, threadID, video, format, sendMessage) {
+    await sendMessage(threadID, `${getRandomMessage(DOWNLOAD_MESSAGES)}\nFormat: ${format}`);
     
     const downloadApi = format === 'MP3' ? MP3_API_BASE : MP4_API_BASE;
     const downloadUrl = `${downloadApi}?url=${encodeURIComponent(video.url)}${format === 'MP4' ? '&format=360' : ''}`;
@@ -175,7 +187,7 @@ async function handleVideoDownload(senderId, video, format, sendMessage) {
         const dlRes = await axios.get(downloadUrl);
         if (dlRes.data && dlRes.data.success && dlRes.data.result) {
             const directUrl = dlRes.data.result.downloadUrl;
-            await sendMessage(senderId, {
+            await sendMessage(threadID, {
                 attachment: {
                     type: format === 'MP3' ? 'audio' : 'video',
                     payload: { url: directUrl, is_reusable: true }
@@ -188,19 +200,19 @@ async function handleVideoDownload(senderId, video, format, sendMessage) {
             });
             
             setTimeout(async () => {
-                await sendMessage(senderId, "✅ Fichier envoyé ! Souhaitez-vous également recevoir le lien de téléchargement direct ? (Répondez par Oui ou Non)");
+                await sendMessage(threadID, "✅ Fichier envoyé ! Souhaitez-vous également recevoir le lien de téléchargement direct ? (Répondez par Oui ou Non)");
             }, 2000);
 
         } else {
             throw new Error();
         }
     } catch (e) {
-        await sendMessage(senderId, "❌ Erreur lors du téléchargement. Le fichier est peut-être trop lourd.");
+        await sendMessage(threadID, "❌ Erreur lors du téléchargement. Le fichier est peut-être trop lourd.");
         userSessions.delete(senderId);
     }
 }
 
-async function handleInfoDisplay(senderId, video, sendMessage) {
+async function handleInfoDisplay(threadID, video, sendMessage) {
     const info = `💠 𝗜𝗡𝗙𝗢𝗦 𝗩𝗜𝗗𝗘́𝗢 💠\n━━━━━━━━━━━━━━━━━━━\n📝 Titre : ${video.title}\n🆔 ID : ${video.videoId}\n🔗 Lien : ${video.url}`;
-    await sendMessage(senderId, info);
+    await sendMessage(threadID, info);
 }
